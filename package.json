@@ -1,0 +1,20 @@
+{
+  "name": "fiducia",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "test": "turbo test",
+    "typecheck": "turbo typecheck",
+    "db:generate": "pnpm --filter @fiducia/api prisma:generate",
+    "db:migrate": "pnpm --filter @fiducia/api prisma:migrate",
+    "db:seed": "pnpm --filter @fiducia/api prisma:seed"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.6",
+    "typescript": "^5.9.3"
+  }
+}

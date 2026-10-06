@@ -1,0 +1,611 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  BUYER
+  SELLER
+  SHOP_STAFF
+  AGENT
+  FINANCE_PARTNER
+  ADMIN
+  SUPPORT
+}
+enum UserStatus {
+  ACTIVE
+  DELETION_REQUESTED
+  DELETED
+}
+enum ShopStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  SUSPENDED
+}
+enum ShopMemberRole {
+  OWNER
+  SHOP_STAFF
+}
+enum LenderType {
+  BANK
+  SFD
+  FINTECH
+}
+enum LenderStatus {
+  PENDING
+  VERIFIED
+  SUSPENDED
+}
+enum ConsentKind {
+  TERMS
+  PRIVACY
+  DATA_PURPOSES
+}
+enum KycDocumentKind {
+  MANAGER_ID
+  FRONT_ID
+  BACK_ID
+  IFU
+  RCCM
+  SHOP_PHOTO
+  LENDER_LICENSE
+  OTHER
+}
+
+model User {
+  id                 String          @id @default(cuid())
+  phone              String?         @unique
+  roles              UserRole[]      @default([BUYER])
+  status             UserStatus      @default(ACTIVE)
+  deletionRequestedAt DateTime?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  consents           Consent[]
+  shopMemberships    ShopMember[]
+  ownedShops         Shop[]
+  lenderMemberships  LenderMember[]
+  refreshTokens      RefreshToken[]
+  kycDocuments       KycDocument[]
+  invitations        ShopInvitation[] @relation("InvitedBy")
+  inspections         Inspection[]          @relation("InspectionInspector")
+  certificates        Certificate[]         @relation("CertificateIssuer")
+  marketplaceListings MarketplaceListing[]  @relation("ListingCreator")
+  theftReports        TheftReport[]         @relation("TheftReporter")
+  purchases           Purchase[]            @relation("PurchaseBuyer")
+  reviews             Review[]              @relation("ReviewAuthor")
+  marketplaceReports  MarketplaceReport[]   @relation("MarketplaceReportReporter")
+}
+
+model Shop {
+  id                       String          @id @default(cuid())
+  slug                     String          @unique @default(cuid())
+  name                     String
+  city                     String
+  address                  String
+  whatsapp                 String
+  logoKey                  String?
+  status                   ShopStatus      @default(PENDING)
+  enabledPaymentOptions    PaymentOptionKind[] @default([CASH])
+  ownerId                  String
+  owner                    User            @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  ifu                      String?
+  rccm                     String?
+  encryptedKkiapayPrivateKey String?
+  members                  ShopMember[]
+  invitations              ShopInvitation[]
+  kycDocuments             KycDocument[]
+  inspections              Inspection[]
+  certificates             Certificate[]
+  marketplaceListings      MarketplaceListing[]
+  devices                  Device[]
+  purchases                Purchase[]
+  reviews                  Review[]
+  marketplaceReports       MarketplaceReport[]
+  notifications            ShopNotification[]
+  createdAt                DateTime        @default(now())
+  updatedAt                DateTime        @updatedAt
+  @@index([status, city])
+  @@index([ownerId])
+}
+
+model ShopMember {
+  id        String         @id @default(cuid())
+  shopId    String
+  userId    String
+  role      ShopMemberRole @default(SHOP_STAFF)
+  createdAt DateTime       @default(now())
+  shop      Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([shopId, userId])
+  @@index([userId])
+}
+
+model ShopInvitation {
+  id           String   @id @default(cuid())
+  shopId       String
+  invitedById  String
+  phone        String
+  tokenHash    String   @unique
+  expiresAt    DateTime
+  acceptedAt   DateTime?
+  createdAt    DateTime @default(now())
+  shop         Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  invitedBy    User     @relation("InvitedBy", fields: [invitedById], references: [id], onDelete: Cascade)
+  @@index([phone, expiresAt])
+}
+
+model LenderOrganization {
+  id                       String          @id @default(cuid())
+  name                     String
+  type                     LenderType
+  accreditationNumber      String          @unique
+  accreditationDocumentKey String
+  validUntil               DateTime
+  status                   LenderStatus    @default(PENDING)
+  members                  LenderMember[]
+  createdAt                DateTime        @default(now())
+  updatedAt                DateTime        @updatedAt
+}
+
+model LenderMember {
+  id             String            @id @default(cuid())
+  userId         String
+  lenderId       String
+  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lender         LenderOrganization @relation(fields: [lenderId], references: [id], onDelete: Cascade)
+  createdAt      DateTime          @default(now())
+  @@unique([userId, lenderId])
+}
+
+model KycDocument {
+  id           String           @id @default(cuid())
+  ownerUserId  String?
+  shopId       String?
+  kind         KycDocumentKind
+  storageKey   String           @unique
+  originalName String
+  mimeType     String
+  sizeBytes    Int
+  sha256       String
+  verifiedAt   DateTime?
+  createdAt    DateTime         @default(now())
+  ownerUser    User?            @relation(fields: [ownerUserId], references: [id], onDelete: SetNull)
+  shop         Shop?            @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  @@index([shopId, kind])
+  @@index([ownerUserId])
+}
+
+model Consent {
+  id        String      @id @default(cuid())
+  userId    String
+  kind      ConsentKind
+  version   String
+  acceptedAt DateTime   @default(now())
+  ipHash    String?
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, acceptedAt])
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  actorId      String?
+  action       String
+  resourceType String
+  resourceId   String?
+  metadata     Json
+  ipHash       String?
+  createdAt    DateTime @default(now())
+  @@index([resourceType, resourceId, createdAt])
+  @@index([actorId, createdAt])
+}
+
+model OtpChallenge {
+  id         String   @id @default(cuid())
+  phone      String
+  codeHash   String
+  attempts   Int      @default(0)
+  ipHash     String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime @default(now())
+  @@index([phone, createdAt])
+  @@index([expiresAt])
+}
+
+model RefreshToken {
+  id         String   @id @default(cuid())
+  userId     String
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  replacedBy String?
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, revokedAt])
+}
+
+enum InspectionVerdict {
+  PASS
+  FAIL
+  REVIEW
+}
+
+enum CertificateStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+  SUPERSEDED
+}
+
+enum TheftReportStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum VerificationVerdict {
+  TRUSTED
+  WARNING
+  REJECTED
+  UNDER_LIEN
+}
+
+enum ImeiRegistryStatus {
+  CERTIFIED
+  REPORTED_STOLEN
+  BLOCKED
+  UNDER_RESERVATION
+  UNDER_LIEN
+  SOLD
+}
+
+enum InspectionPhotoKind {
+  FRONT
+  BACK
+  SETTINGS_IMEI_SERIAL
+}
+
+enum MarketplaceListingStatus {
+  DRAFT
+  PENDING_REVIEW
+  PUBLISHED
+  RESERVED
+  WITHDRAWN
+  EXPIRED
+  SUSPENDED
+  SOLD
+}
+
+enum DeviceCondition {
+  NEW
+  LIKE_NEW
+  GOOD
+  FAIR
+}
+
+enum PaymentOptionKind {
+  CASH
+  INSTALLMENT_A
+  INSTALLMENT_B
+  PARTNER_FINANCING
+}
+
+enum PurchaseStatus {
+  PENDING
+  PAID
+  COMPLETED
+  CANCELLED
+  REFUNDED
+}
+
+enum MarketplaceReportSubject {
+  LISTING
+  SHOP
+}
+
+enum MarketplaceReportSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum MarketplaceReportStatus {
+  PENDING
+  UNDER_REVIEW
+  RESOLVED
+  REJECTED
+}
+
+enum ShopNotificationType {
+  LISTING_SUSPENDED
+  MARKETPLACE_REPORT
+  CERTIFICATE_REVOKED
+}
+
+enum TheftReportEventType {
+  SUBMITTED
+  SELLER_RESPONSE
+  VERIFIED
+  REJECTED
+}
+
+model Inspection {
+  id             String            @id @default(cuid())
+  imeiHash       String
+  maskedImei     String
+  shopId         String
+  inspectorId    String
+  inspectorRole  UserRole
+  score          Int
+  verdict        InspectionVerdict @default(REVIEW)
+  screenOriginal Boolean
+  batteryPercent Int
+  faceId         Boolean?
+  touchId        Boolean?
+  cameras        Boolean
+  buttons        Boolean
+  speakers       Boolean
+  ports          Boolean
+  repairTraces   Boolean
+  notes          String?
+  checklist      Json
+  createdAt      DateTime          @default(now())
+  shop           Shop              @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  inspector      User              @relation("InspectionInspector", fields: [inspectorId], references: [id], onDelete: Restrict)
+  photos         InspectionPhoto[]
+  verificationReport VerificationReport?
+  certificate    Certificate?
+  @@index([imeiHash, createdAt])
+  @@index([shopId, createdAt])
+}
+
+model InspectionPhoto {
+  id           String             @id @default(cuid())
+  inspectionId String
+  kind         InspectionPhotoKind
+  storageKey   String             @unique
+  mimeType     String
+  sizeBytes    Int
+  sha256       String
+  createdAt    DateTime           @default(now())
+  inspection   Inspection         @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  @@unique([inspectionId, kind])
+}
+
+model Certificate {
+  id               String            @id @default(cuid())
+  code             String            @unique
+  imeiHash         String
+  maskedImei       String
+  model            String
+  capacity         String
+  color            String
+  riskLevel        VerificationVerdict
+  sourcesConsulted String[]
+  issuedAt         DateTime          @default(now())
+  expiresAt        DateTime
+  status           CertificateStatus @default(ACTIVE)
+  signature        String
+  signingKeyId     String
+  shopId           String
+  issuerId         String
+  verificationReportId String        @unique
+  verifiedAt       DateTime?
+  revocationReason String?
+  supersededById   String?
+  inspectionId     String?           @unique
+  lienLenderId     String?
+  legalNotice      String
+  shop             Shop              @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  issuer           User              @relation("CertificateIssuer", fields: [issuerId], references: [id], onDelete: Restrict)
+  verificationReport VerificationReport @relation(fields: [verificationReportId], references: [id], onDelete: Restrict)
+  inspection       Inspection?       @relation(fields: [inspectionId], references: [id], onDelete: SetNull)
+  listings         MarketplaceListing[]
+  @@index([imeiHash, status])
+  @@index([shopId, issuedAt])
+  @@index([expiresAt, status])
+}
+
+model VerificationReport {
+  id               String              @id @default(cuid())
+  imeiHash         String
+  maskedImei       String
+  verdict          VerificationVerdict
+  sourcesConsulted String[]
+  coverageScore    Float
+  checkedAt        DateTime
+  createdAt        DateTime            @default(now())
+  inspectionId     String?             @unique
+  inspection       Inspection?         @relation(fields: [inspectionId], references: [id], onDelete: SetNull)
+  certificate      Certificate?
+  @@index([imeiHash, checkedAt])
+}
+
+model ImeiRegistryEntry {
+  id          String            @id @default(cuid())
+  imeiHash    String            @unique
+  status      ImeiRegistryStatus
+  reason      String
+  lenderId    String?
+  changedById String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  @@index([status, updatedAt])
+}
+
+model MarketplaceListing {
+  id              String                   @id @default(cuid())
+  slug            String                   @unique @default(cuid())
+  shopId          String
+  createdById     String
+  deviceId        String
+  certificateId   String?
+  status          MarketplaceListingStatus @default(DRAFT)
+  priceCashXof    Int
+  paymentOptions  PaymentOptionKind[]      @default([CASH])
+  expiresAt       DateTime?
+  reservedUntil   DateTime?
+  publishedAt     DateTime?
+  suspendedReason String?
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  shop            Shop                     @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  createdBy       User                     @relation("ListingCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  device          Device                   @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  certificate     Certificate?             @relation(fields: [certificateId], references: [id], onDelete: SetNull)
+  photos          ListingPhoto[]
+  purchases       Purchase[]
+  reviews         Review[]
+  reports         MarketplaceReport[]
+  @@index([status, publishedAt, id])
+  @@index([shopId, status])
+  @@index([deviceId, status])
+  @@index([priceCashXof, status])
+}
+
+model Device {
+  id                String          @id @default(cuid())
+  imeiEncrypted     String
+  imeiHash          String          @unique
+  serialEncrypted   String
+  serialHash        String?
+  model             String
+  capacity          String
+  color             String
+  condition         DeviceCondition
+  batteryPercent    Int
+  shopId            String
+  activeListingHash String?         @unique
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  shop              Shop            @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  listings          MarketplaceListing[]
+  @@index([shopId, createdAt])
+}
+
+model ListingPhoto {
+  id         String             @id @default(cuid())
+  listingId  String
+  storageKey String             @unique
+  mimeType   String
+  width      Int
+  height     Int
+  position   Int
+  createdAt  DateTime           @default(now())
+  listing    MarketplaceListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  @@unique([listingId, position])
+}
+
+model Purchase {
+  id          String             @id @default(cuid())
+  listingId   String
+  shopId      String
+  buyerId     String
+  status      PurchaseStatus     @default(PENDING)
+  totalXof    Int
+  completedAt DateTime?
+  createdAt   DateTime           @default(now())
+  listing     MarketplaceListing @relation(fields: [listingId], references: [id], onDelete: Restrict)
+  shop        Shop               @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  buyer       User               @relation("PurchaseBuyer", fields: [buyerId], references: [id], onDelete: Restrict)
+  review      Review?
+  @@index([buyerId, status])
+  @@index([listingId, status])
+}
+
+model Review {
+  id         String             @id @default(cuid())
+  purchaseId String             @unique
+  listingId  String
+  shopId     String
+  authorId   String
+  rating     Int
+  body       String?
+  createdAt  DateTime           @default(now())
+  purchase   Purchase           @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+  listing    MarketplaceListing @relation(fields: [listingId], references: [id], onDelete: Restrict)
+  shop       Shop               @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  author     User               @relation("ReviewAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  @@index([shopId, createdAt])
+}
+
+model MarketplaceReport {
+  id               String                    @id @default(cuid())
+  subjectType      MarketplaceReportSubject
+  listingId        String?
+  shopId           String?
+  reporterId       String
+  severity         MarketplaceReportSeverity
+  status           MarketplaceReportStatus   @default(PENDING)
+  reason           String
+  details          String?
+  sellerResponse   String?
+  responseAt       DateTime?
+  responseDeadline DateTime?
+  reviewedById     String?
+  reviewedAt       DateTime?
+  resolution       String?
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+  listing          MarketplaceListing?       @relation(fields: [listingId], references: [id], onDelete: Restrict)
+  shop             Shop?                     @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  reporter         User                      @relation("MarketplaceReportReporter", fields: [reporterId], references: [id], onDelete: Restrict)
+  @@index([status, severity, createdAt])
+  @@index([listingId, status])
+  @@index([shopId, status])
+}
+
+model ShopNotification {
+  id        String               @id @default(cuid())
+  shopId    String
+  type      ShopNotificationType
+  title     String
+  message   String
+  readAt    DateTime?
+  createdAt DateTime             @default(now())
+  shop      Shop                 @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  @@index([shopId, readAt, createdAt])
+}
+
+model TheftReport {
+  id                String            @id @default(cuid())
+  imeiEncrypted     String
+  imeiHash          String
+  maskedImei        String
+  date              DateTime
+  place             String
+  policeReceiptKey  String
+  evidenceKey       String?
+  notes             String?
+  status            TheftReportStatus @default(PENDING)
+  reporterId        String
+  reviewedById      String?
+  sellerResponse    String?
+  responseDeadline  DateTime?
+  createdAt         DateTime          @default(now())
+  reviewedAt        DateTime?
+  rejectionReason   String?
+  reporter          User              @relation("TheftReporter", fields: [reporterId], references: [id], onDelete: Restrict)
+  history           TheftReportHistory[]
+  @@index([imeiHash, status])
+  @@index([status, createdAt])
+}
+
+model TheftReportHistory {
+  id         String               @id @default(cuid())
+  reportId   String
+  actorId    String?
+  event      TheftReportEventType
+  fromStatus TheftReportStatus?
+  toStatus   TheftReportStatus?
+  details    Json
+  createdAt  DateTime             @default(now())
+  report     TheftReport          @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  @@index([reportId, createdAt])
+}

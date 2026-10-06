@@ -1,0 +1,6 @@
+import Link from "next/link";
+import { BrandMark } from "@/components/brand-mark";
+
+export default function PrivacyPage() {
+  return <main className="legal-page"><div className="auth-top"><BrandMark /><Link className="back-link" href="/">Accueil</Link></div><span className="eyebrow">FIDUCIA · DONNÉES PERSONNELLES</span><h1>Confidentialité</h1><div className="legal-notice">Notice de lancement à compléter et faire valider par un spécialiste de la protection des données au Bénin avant production.</div><h2>Données collectées</h2><p>Le service utilise votre numéro de téléphone pour l’authentification, vos consentements horodatés et, pour les boutiques ou prêteurs, les informations nécessaires à leur vérification.</p><h2>Pièces justificatives</h2><p>Les pièces KYC sont transmises par un canal privé, chiffrées par l’application et stockées dans un espace non public. Les journaux techniques ne doivent contenir ni pièces d’identité, ni numéro complet d’IMEI, ni secret de paiement.</p><h2>Vos droits</h2><p>Depuis votre compte, vous pouvez demander un export ou la suppression de vos données. Certaines traces peuvent nécessiter une conservation limitée pour répondre aux obligations légales ; les durées et modalités doivent être définies avec le conseil juridique.</p></main>;
+}

@@ -1,0 +1,10 @@
+{
+  "name": "Fiducia",
+  "short_name": "Fiducia",
+  "description": "Acheter et vendre des iPhone en confiance au Bénin.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4f7f3",
+  "theme_color": "#10372f",
+  "lang": "fr"
+}

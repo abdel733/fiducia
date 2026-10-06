@@ -1,0 +1,15 @@
+{
+  "name": "@fiducia/config",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/env.js",
+  "types": "./src/env.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": { "zod": "^3.25.76" },
+  "devDependencies": { "@types/node": "^22.18.6", "typescript": "^5.9.3", "vitest": "^3.2.4" }
+}

@@ -1,0 +1,6 @@
+import Link from "next/link";
+import { BrandMark } from "@/components/brand-mark";
+
+export default function TermsPage() {
+  return <main className="legal-page"><div className="auth-top"><BrandMark /><Link className="back-link" href="/">Accueil</Link></div><span className="eyebrow">FIDUCIA · BÉNIN</span><h1>Conditions d’utilisation</h1><div className="legal-notice">Projet de conditions. Une validation par un conseil juridique béninois est nécessaire avant toute ouverture au public.</div><h2>Rôle de la plateforme</h2><p>Fiducia facilite la mise en relation entre acheteurs, boutiques et partenaires. Les contrôles d’appareils ne certifient pas l’origine et ne garantissent pas l’absence de signalement au-delà des sources consultées.</p><h2>Paiement et financement</h2><p>La plateforme ne détient pas les fonds des clients et n’accorde aucun crédit. Un paiement par tranches sans remise immédiate doit rester au prix comptant. Toute offre de financement immédiat est portée par un prêteur agréé, qui détient la créance et encaisse les remboursements.</p><h2>Informations à finaliser</h2><p>Les modalités de vente, livraison, réclamations, responsabilité, médiation, frais et droit applicable doivent être complétées et validées avant le lancement.</p></main>;
+}

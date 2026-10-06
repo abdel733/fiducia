@@ -1,0 +1,16 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "strictPropertyInitialization": false,
+    "esModuleInterop": true,
+    "outDir": "dist",
+    "types": ["node", "jest", "multer"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "prisma/seed.ts"],
+  "exclude": ["node_modules", "dist"]
+}
