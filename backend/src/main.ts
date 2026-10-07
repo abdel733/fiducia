@@ -9,7 +9,7 @@ import { AppModule } from "./app.module";
 import { validateEnvironment } from "@fiducia/config";
 
 async function bootstrap(): Promise<void> {
-  loadEnvironmentFile({ path: process.env.ENV_FILE ?? resolve(__dirname, "../../.env") });
+  loadEnvironmentFile({ path: process.env.ENV_FILE ?? resolve(__dirname, "../.env") });
   const config = validateEnvironment();
   const app = await NestFactory.create(AppModule);
   app.setGlobalPrefix("v1");

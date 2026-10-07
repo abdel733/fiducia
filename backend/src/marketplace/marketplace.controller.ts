@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query, Res, UploadedFile, UseGuards, UseInterceptors } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { ApiBearerAuth, ApiConsumes, ApiTags } from "@nestjs/swagger";
-import { UserRole } from "@prisma/client";
+import { MarketplaceReportSeverity, UserRole } from "@prisma/client";
 import { Response } from "express";
 import { AccessTokenGuard } from "../auth/access-token.guard";
 import { AuthenticatedUser } from "../auth/auth.types";
@@ -97,6 +97,27 @@ export class MarketplaceController {
     return this.marketplace.submitForReview(listingId, actor);
   }
 
+  @Get("listings/:listingId/certificate")
+  @UseGuards(AccessTokenGuard)
+  @ApiBearerAuth()
+  checkListingCertificate(@Param("listingId") listingId: string, @CurrentUser() actor: AuthenticatedUser) {
+    return this.marketplace.checkListingCertificate(listingId, actor);
+  }
+
+  @Get("shops/:shopId/listings")
+  @UseGuards(AccessTokenGuard)
+  @ApiBearerAuth()
+  listShopListings(@Param("shopId") shopId: string, @CurrentUser() actor: AuthenticatedUser) {
+    return this.marketplace.listShopListings(shopId, actor);
+  }
+
+  @Post("shops/:shopId/certificate-check")
+  @UseGuards(AccessTokenGuard)
+  @ApiBearerAuth()
+  checkShopImeiCertificate(@Param("shopId") shopId: string, @Body() body: { imei: string }, @CurrentUser() actor: AuthenticatedUser) {
+    return this.marketplace.checkShopImeiCertificate(shopId, body.imei, actor);
+  }
+
   @Patch("listings/:listingId/moderation")
   @UseGuards(AccessTokenGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
@@ -132,6 +153,14 @@ export class MarketplaceController {
   @ApiBearerAuth()
   reviewReport(@Param("reportId") reportId: string, @Body() body: { decision: "RESOLVED" | "REJECTED"; resolution: string }, @CurrentUser() actor: AuthenticatedUser) {
     return this.marketplace.reviewReport(reportId, body.decision, body.resolution, actor);
+  }
+
+  @Patch("reports/:reportId/severity")
+  @UseGuards(AccessTokenGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiBearerAuth()
+  classifyReport(@Param("reportId") reportId: string, @Body() body: { severity: MarketplaceReportSeverity }, @CurrentUser() actor: AuthenticatedUser) {
+    return this.marketplace.classifyReport(reportId, body.severity, actor);
   }
 
   @Get("shops/:shopId/notifications")

@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { InspectionPhotoKind } from "@prisma/client";
 import sharp from "sharp";
 import { AuthenticatedUser } from "../auth/auth.types";
 import { AuditService } from "../audit/audit.service";
@@ -9,6 +10,12 @@ import { StorageProvider } from "../storage/storage.provider";
 import { InspectionChecklistInput, InspectionService, REQUIRED_INSPECTION_PHOTOS } from "./inspection.service";
 
 export type InspectionPhotoFiles = Partial<Record<(typeof REQUIRED_INSPECTION_PHOTOS)[number], Express.Multer.File[]>>;
+
+const inspectionPhotoKind: Record<(typeof REQUIRED_INSPECTION_PHOTOS)[number], InspectionPhotoKind> = {
+  front: "FRONT",
+  back: "BACK",
+  "settings-imei-serial": "SETTINGS_IMEI_SERIAL",
+};
 
 @Injectable()
 export class InspectionWorkflowService {
@@ -38,7 +45,7 @@ export class InspectionWorkflowService {
     if (report.verdict === "WARNING" && !isAgent) throw new ForbiddenException("Un agent partenaire doit valider un IMEI avec avertissement.");
     if (report.inspectionId) throw new ConflictException("Ce rapport IMEI est déjà associé à une inspection.");
 
-    const photoFiles = new Map<string, Express.Multer.File>();
+    const photoFiles = new Map<(typeof REQUIRED_INSPECTION_PHOTOS)[number], Express.Multer.File>();
     for (const kind of REQUIRED_INSPECTION_PHOTOS) {
       const file = files[kind]?.[0];
       if (!file || !file.mimetype.startsWith("image/") || file.size > 8 * 1024 * 1024) {
@@ -49,7 +56,7 @@ export class InspectionWorkflowService {
 
     const evaluation = this.evaluator.evaluate({ ...input, photos: [...photoFiles.keys()] });
     const inspectionId = `inspection-${randomUUID()}`;
-    const uploaded: { kind: string; key: string; mimeType: string; size: number; sha256: string }[] = [];
+    const uploaded: { kind: (typeof REQUIRED_INSPECTION_PHOTOS)[number]; key: string; mimeType: string; size: number; sha256: string }[] = [];
     try {
       for (const [kind, file] of photoFiles) {
         const result = await sharp(file.buffer, { failOn: "error" }).rotate().resize({ width: 1800, height: 1800, fit: "inside", withoutEnlargement: true }).webp({ quality: 76 }).toBuffer();
@@ -85,7 +92,7 @@ export class InspectionWorkflowService {
             repairTraces: input.repairTraces,
             notes: input.notes?.slice(0, 2000),
             checklist: { ...evaluation.checks, requiredPhotos: evaluation.requiredPhotos },
-            photos: { create: uploaded.map((photo) => ({ kind: photo.kind === "settings-imei-serial" ? "SETTINGS_IMEI_SERIAL" : photo.kind.toUpperCase(), storageKey: photo.key, mimeType: photo.mimeType, sizeBytes: photo.size, sha256: photo.sha256 })) },
+            photos: { create: uploaded.map((photo) => ({ kind: inspectionPhotoKind[photo.kind], storageKey: photo.key, mimeType: photo.mimeType, sizeBytes: photo.size, sha256: photo.sha256 })) },
           },
           select: { id: true, score: true, verdict: true, maskedImei: true, createdAt: true, photos: { select: { kind: true } } },
         });

@@ -26,7 +26,7 @@ export class ImeiVerificationService {
     const normalized = normalizeImei(imei);
     const cacheKey = createHash("sha256").update(`imei:${normalized}`).digest("hex");
     const cached = this.cache.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) {
+    if (!options.forceRefresh && cached && cached.expiresAt > Date.now()) {
       return cached.report;
     }
 
@@ -66,11 +66,14 @@ export class ImeiVerificationService {
 
     let lastError: unknown;
     for (let attempt = 0; attempt < 2; attempt += 1) {
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
       try {
         const startedAt = Date.now();
         const result = await Promise.race([
           provider.check(imei, options),
-          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 3000)),
+          new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(() => reject(new Error("timeout")), 3000);
+          }),
         ]);
         this.logCall(provider.name, "success", Date.now() - startedAt, result.status);
         this.circuitBreakers.set(provider.name, { openedUntil: 0, failures: 0 });
@@ -79,6 +82,8 @@ export class ImeiVerificationService {
       } catch (error) {
         lastError = error;
         this.logCall(provider.name, "error", 0, "ERROR");
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
       }
     }
 

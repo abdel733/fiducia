@@ -12,6 +12,8 @@ import { ImeiModule } from "./imei/imei.module";
 import { InspectionModule } from "./inspection/inspection.module";
 import { LendersModule } from "./lenders/lenders.module";
 import { MarketplaceModule } from "./marketplace/marketplace.module";
+import { PaymentsModule } from "./payments/payments.module";
+import { LayawayModule } from "./payments/layaway.module";
 import { RedisModule } from "./redis/redis.module";
 import { ShopsModule } from "./shops/shops.module";
 import { StorageModule } from "./storage/storage.module";
@@ -31,6 +33,8 @@ import { UsersModule } from "./users/users.module";
     ShopsModule,
     LendersModule,
     MarketplaceModule,
+    PaymentsModule,
+    LayawayModule,
     ImeiModule,
     InspectionModule,
     CertificateModule,

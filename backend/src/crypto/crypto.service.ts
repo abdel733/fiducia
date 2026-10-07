@@ -26,12 +26,23 @@ export class CryptoService {
 
   decryptBuffer(envelope: Buffer): Buffer {
     const [version, encodedIv, encodedTag, encodedCiphertext, ...extra] = envelope.toString("ascii").split(".");
-    if (!version || !encodedIv || !encodedTag || !encodedCiphertext || extra.length > 0) throw new Error("Invalid encrypted value");
+    if (!version || !encodedIv || !encodedTag || encodedCiphertext === undefined || extra.length > 0) throw new Error("Invalid encrypted value");
     const encodedKey = this.config.DATA_ENCRYPTION_KEYS[version];
     if (!encodedKey) throw new Error(`Encryption key version ${version} is unavailable`);
-    const decipher = createDecipheriv("aes-256-gcm", Buffer.from(encodedKey, "base64"), Buffer.from(encodedIv, "base64url"));
-    decipher.setAuthTag(Buffer.from(encodedTag, "base64url"));
-    return Buffer.concat([decipher.update(Buffer.from(encodedCiphertext, "base64url")), decipher.final()]);
+    const iv = this.decodeCanonicalBase64Url(encodedIv);
+    const tag = this.decodeCanonicalBase64Url(encodedTag);
+    const ciphertext = encodedCiphertext ? this.decodeCanonicalBase64Url(encodedCiphertext) : Buffer.alloc(0);
+    if (iv.length !== 12 || tag.length !== 16) throw new Error("Invalid encrypted value");
+    const decipher = createDecipheriv("aes-256-gcm", Buffer.from(encodedKey, "base64"), iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+  }
+
+  private decodeCanonicalBase64Url(encoded: string): Buffer {
+    if (!/^[A-Za-z0-9_-]+$/.test(encoded)) throw new Error("Invalid encrypted value");
+    const decoded = Buffer.from(encoded, "base64url");
+    if (decoded.toString("base64url") !== encoded) throw new Error("Invalid encrypted value");
+    return decoded;
   }
 
   hashImei(imei: string): string {

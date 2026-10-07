@@ -8,6 +8,8 @@ import { PrismaService } from "../src/database/prisma.service";
 import { RolesGuard } from "../src/auth/roles.guard";
 import { canTransitionShopStatus, ShopsService } from "../src/shops/shops.service";
 import { StorageProvider } from "../src/storage/storage.provider";
+import { AuthenticatedUser } from "../src/auth/auth.types";
+import { MarketplaceService } from "../src/marketplace/marketplace.service";
 
 describe("resource authorization", () => {
   it("denies a buyer an admin-only action", () => {
@@ -29,6 +31,18 @@ describe("resource authorization", () => {
       {} as AuditService,
     );
     await expect(service.getForMember("buyer-1", "shop-secret")).rejects.toBeInstanceOf(NotFoundException);
+    expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "shop-secret", OR: [{ ownerId: "buyer-1" }, { members: { some: { userId: "buyer-1" } } }] } }));
+  });
+
+  it("denies listing access when the user is not a member of the shop", async () => {
+    const findFirst = jest.fn().mockResolvedValue(null);
+    const service = new MarketplaceService(
+      { shop: { findFirst } } as unknown as PrismaService,
+      {} as CryptoService,
+      {} as StorageProvider,
+      {} as AuditService,
+    );
+    await expect(service.listShopListings("shop-secret", { id: "buyer-1", roles: [UserRole.BUYER] } as AuthenticatedUser)).rejects.toBeInstanceOf(ForbiddenException);
     expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "shop-secret", OR: [{ ownerId: "buyer-1" }, { members: { some: { userId: "buyer-1" } } }] } }));
   });
 

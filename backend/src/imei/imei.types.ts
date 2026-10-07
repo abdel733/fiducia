@@ -14,6 +14,7 @@ export interface ImeiCheckOptions {
   tac?: string;
   model?: string;
   publicMode?: boolean;
+  forceRefresh?: boolean;
 }
 
 export interface ImeiProvider {

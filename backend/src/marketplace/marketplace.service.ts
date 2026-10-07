@@ -8,6 +8,7 @@ import { AuditService } from "../audit/audit.service";
 import { CryptoService } from "../crypto/crypto.service";
 import { PrismaService } from "../database/prisma.service";
 import { StorageProvider } from "../storage/storage.provider";
+import { isValidImei } from "@fiducia/shared";
 
 export interface CreateListingInput {
   imei: string;
@@ -52,6 +53,14 @@ const stateTransitions: Record<MarketplaceListingStatus, MarketplaceListingStatu
 
 export function canTransitionListing(from: MarketplaceListingStatus, to: MarketplaceListingStatus): boolean {
   return stateTransitions[from].includes(to);
+}
+
+export function shouldReleaseListingImei(status: MarketplaceListingStatus): boolean {
+  return status === "PUBLISHED" || status === "RESERVED";
+}
+
+export function getTrustedReportSeverity(requested: MarketplaceReportSeverity, roles: readonly string[]): MarketplaceReportSeverity {
+  return roles.includes("ADMIN") || roles.includes("AGENT") ? requested : "MEDIUM";
 }
 
 @Injectable()
@@ -139,6 +148,48 @@ export class MarketplaceService {
     });
   }
 
+  async checkListingCertificate(listingId: string, actor: AuthenticatedUser) {
+    const listing = await this.requireListingAccess(listingId, actor);
+    const certificate = await this.prisma.certificate.findFirst({
+      where: { imeiHash: listing.device.imeiHash },
+      orderBy: { issuedAt: "desc" },
+      select: { code: true, status: true, expiresAt: true, issuedAt: true, sourcesConsulted: true },
+    });
+    const valid = Boolean(certificate && certificate.status === "ACTIVE" && certificate.expiresAt > new Date());
+    return { valid, certificate };
+  }
+
+  async checkShopImeiCertificate(shopId: string, imei: string, actor: AuthenticatedUser) {
+    await this.requireShopAccess(shopId, actor);
+    if (!isValidImei(imei)) throw new BadRequestException("L’IMEI doit contenir 15 chiffres et avoir une clé de contrôle valide.");
+    const certificate = await this.prisma.certificate.findFirst({
+      where: { imeiHash: this.crypto.hashImei(imei) },
+      orderBy: { issuedAt: "desc" },
+      select: { code: true, status: true, expiresAt: true, issuedAt: true, sourcesConsulted: true },
+    });
+    const valid = Boolean(certificate && certificate.status === "ACTIVE" && certificate.expiresAt > new Date());
+    return { valid, certificate };
+  }
+
+  async listShopListings(shopId: string, actor: AuthenticatedUser) {
+    await this.requireShopAccess(shopId, actor);
+    return this.prisma.marketplaceListing.findMany({
+      where: { shopId },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        slug: true,
+        status: true,
+        priceCashXof: true,
+        createdAt: true,
+        publishedAt: true,
+        suspendedReason: true,
+        device: { select: { model: true, capacity: true } },
+        _count: { select: { purchases: true } },
+      },
+    });
+  }
+
   async moderateListing(listingId: string, target: "PUBLISHED" | "REJECTED", actor: AuthenticatedUser, reason?: string) {
     const listing = await this.prisma.marketplaceListing.findUnique({ where: { id: listingId }, include: { device: true, shop: true } });
     if (!listing) throw new NotFoundException("Annonce introuvable.");
@@ -177,7 +228,12 @@ export class MarketplaceService {
         where: { id: listingId },
         data: { status: target, reservedUntil: target === "RESERVED" ? reservedUntil : null },
       });
-      if (clearActive) await transaction.device.update({ where: { id: listing.deviceId }, data: { activeListingHash: null } });
+      if (clearActive && shouldReleaseListingImei(listing.status)) {
+        await transaction.device.updateMany({
+          where: { id: listing.deviceId, activeListingHash: listing.device.imeiHash },
+          data: { activeListingHash: null },
+        });
+      }
       return updated;
     });
   }
@@ -199,7 +255,7 @@ export class MarketplaceService {
     for (const listing of expiredListings) await this.suspendListing(listing.id, "Certificat expiré ou révoqué");
     const where: Prisma.MarketplaceListingWhereInput = {
       status: { in: activeListingStatuses },
-      shop: filters.sellerVerified === false ? undefined : { status: "VERIFIED" },
+      shop: { status: "VERIFIED" },
       device: {
         model: filters.model ? { contains: filters.model, mode: "insensitive" } : undefined,
         capacity: filters.capacity ? { contains: filters.capacity, mode: "insensitive" } : undefined,
@@ -250,7 +306,7 @@ export class MarketplaceService {
         device: { select: { model: true, capacity: true, color: true, condition: true, batteryPercent: true } },
         certificate: { select: { code: true, status: true, expiresAt: true, issuedAt: true, sourcesConsulted: true, riskLevel: true } },
         photos: { orderBy: { position: "asc" }, select: { id: true, position: true, width: true, height: true } },
-        reviews: { orderBy: { createdAt: "desc" }, take: 20, select: { id: true, rating: true, body: true, createdAt: true, author: { select: { phone: true } } } },
+        reviews: { orderBy: { createdAt: "desc" }, take: 20, select: { id: true, rating: true, body: true, createdAt: true } },
       },
     });
     if (!listing || !activeListingStatuses.includes(listing.status) || listing.shop.status !== "VERIFIED") throw new NotFoundException("Annonce indisponible.");
@@ -262,23 +318,57 @@ export class MarketplaceService {
   }
 
   async getPublicShop(slug: string) {
+    const now = new Date();
     const shop = await this.prisma.shop.findUnique({
       where: { slug },
-      include: {
+      select: {
+        id: true,
+        slug: true,
+        name: true,
+        city: true,
+        whatsapp: true,
+        status: true,
+        enabledPaymentOptions: true,
         reviews: { orderBy: { createdAt: "desc" }, take: 20, select: { id: true, rating: true, body: true, createdAt: true } },
         marketplaceListings: {
-          where: { status: { in: activeListingStatuses } },
-          include: { device: { select: { model: true, capacity: true, color: true, condition: true, batteryPercent: true } }, certificate: { select: { code: true, status: true, expiresAt: true } }, photos: { orderBy: { position: "asc" }, take: 1 } },
+          where: {
+            status: { in: activeListingStatuses },
+            certificate: { is: { status: "ACTIVE", expiresAt: { gt: now } } },
+          },
+          select: {
+            id: true,
+            slug: true,
+            status: true,
+            priceCashXof: true,
+            paymentOptions: true,
+            device: { select: { model: true, capacity: true, color: true, condition: true, batteryPercent: true } },
+            certificate: { select: { code: true, status: true, expiresAt: true, issuedAt: true, sourcesConsulted: true, riskLevel: true } },
+            photos: { orderBy: { position: "asc" }, take: 1, select: { id: true } },
+            _count: { select: { reviews: true } },
+          },
         },
       },
     });
     if (!shop || shop.status !== "VERIFIED") throw new NotFoundException("Boutique indisponible.");
-    return shop;
+    return {
+      ...shop,
+      marketplaceListings: shop.marketplaceListings.map((listing) => ({
+        ...listing,
+        shop: { slug: shop.slug, name: shop.name, city: shop.city, status: shop.status },
+      })),
+    };
   }
 
   async getPublicPhoto(photoId: string) {
-    const photo = await this.prisma.listingPhoto.findUnique({ where: { id: photoId }, include: { listing: { select: { status: true, shop: { select: { status: true } } } } } });
+    const photo = await this.prisma.listingPhoto.findUnique({
+      where: { id: photoId },
+      include: { listing: { select: { id: true, status: true, certificate: { select: { status: true, expiresAt: true } }, shop: { select: { status: true } } } } },
+    });
     if (!photo || !activeListingStatuses.includes(photo.listing.status) || photo.listing.shop.status !== "VERIFIED") throw new NotFoundException("Photo indisponible.");
+    if (!photo.listing.certificate || photo.listing.certificate.status !== "ACTIVE" || photo.listing.certificate.expiresAt <= new Date()) {
+      await this.suspendListing(photo.listing.id, "Certificat expiré ou révoqué");
+      throw new NotFoundException("Photo indisponible.");
+    }
     return { photo, bytes: await this.storage.downloadPrivate(photo.storageKey) };
   }
 
@@ -290,30 +380,49 @@ export class MarketplaceService {
       ? (await this.prisma.marketplaceListing.findUnique({ where: { id: input.listingId! }, select: { shopId: true } }))?.shopId
       : input.shopId;
     if (!targetShopId) throw new NotFoundException("Cible du signalement introuvable.");
+    const severity = getTrustedReportSeverity(input.severity, actor.roles);
     const createdAt = new Date();
     const report = await this.prisma.marketplaceReport.create({
       data: {
         subjectType: input.subjectType, listingId: input.listingId, shopId: input.shopId,
-        reporterId: actor.id, severity: input.severity, reason: input.reason.trim(), details: input.details?.trim(),
+        reporterId: actor.id, severity, reason: input.reason.trim(), details: input.details?.trim(),
         responseDeadline: new Date(createdAt.getTime() + 48 * 60 * 60 * 1000),
       },
     });
-    if (input.subjectType === "LISTING" && input.listingId && ["HIGH", "CRITICAL"].includes(input.severity)) {
-      await this.suspendListing(input.listingId, `Signalement ${input.severity.toLowerCase()} en cours de revue`);
+    if (input.subjectType === "LISTING" && input.listingId && ["HIGH", "CRITICAL"].includes(severity)) {
+      await this.suspendListing(input.listingId, `Signalement ${severity.toLowerCase()} en cours de revue`);
     }
-    if (input.subjectType === "SHOP" && ["HIGH", "CRITICAL"].includes(input.severity)) {
+    if (input.subjectType === "SHOP" && ["HIGH", "CRITICAL"].includes(severity)) {
       await this.prisma.shop.update({ where: { id: targetShopId }, data: { status: "SUSPENDED" } });
     }
     await this.prisma.shopNotification.create({
       data: {
         shopId: targetShopId,
-        type: input.severity === "HIGH" || input.severity === "CRITICAL" ? "LISTING_SUSPENDED" : "MARKETPLACE_REPORT",
+        type: severity === "HIGH" || severity === "CRITICAL" ? "LISTING_SUSPENDED" : "MARKETPLACE_REPORT",
         title: "Signalement reçu",
-        message: `Un signalement de gravité ${input.severity.toLowerCase()} a été reçu. Réponse attendue avant le ${report.responseDeadline?.toISOString() ?? "délai indiqué"}.`,
+        message: `Un signalement de gravité ${severity.toLowerCase()} a été reçu. Réponse attendue avant le ${report.responseDeadline?.toISOString() ?? "délai indiqué"}.`,
       },
     });
-    await this.audit.record({ actorId: actor.id, action: "marketplace.report.created", resourceType: "MarketplaceReport", resourceId: report.id, metadata: { subjectType: report.subjectType, severity: report.severity } });
+    await this.audit.record({ actorId: actor.id, action: "marketplace.report.created", resourceType: "MarketplaceReport", resourceId: report.id, metadata: { subjectType: report.subjectType, severity } });
     return { id: report.id, status: report.status, responseDeadline: report.responseDeadline };
+  }
+
+  async classifyReport(reportId: string, severity: MarketplaceReportSeverity, actor: AuthenticatedUser) {
+    if (!["LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(severity)) throw new BadRequestException("Gravité de signalement invalide.");
+    const report = await this.prisma.marketplaceReport.findUnique({ where: { id: reportId } });
+    if (!report) throw new NotFoundException("Signalement introuvable.");
+    if (!["PENDING", "UNDER_REVIEW"].includes(report.status)) throw new BadRequestException("Ce signalement est déjà clôturé.");
+    const updated = await this.prisma.marketplaceReport.update({ where: { id: reportId }, data: { severity } });
+    if (["HIGH", "CRITICAL"].includes(severity)) {
+      if (report.subjectType === "LISTING" && report.listingId) {
+        await this.suspendListing(report.listingId, `Signalement ${severity.toLowerCase()} en cours de revue`);
+      } else if (report.shopId) {
+        await this.prisma.shop.update({ where: { id: report.shopId }, data: { status: "SUSPENDED" } });
+        await this.prisma.shopNotification.create({ data: { shopId: report.shopId, type: "MARKETPLACE_REPORT", title: "Boutique suspendue", message: `Signalement ${severity.toLowerCase()} en cours de revue.` } });
+      }
+    }
+    await this.audit.record({ actorId: actor.id, action: "marketplace.report.classified", resourceType: "MarketplaceReport", resourceId: reportId, metadata: { severity } });
+    return { id: updated.id, severity: updated.severity, status: updated.status };
   }
 
   async respondToReport(reportId: string, response: string, actor: AuthenticatedUser) {
@@ -414,12 +523,20 @@ export class MarketplaceService {
   }
 
   private async suspendListing(listingId: string, reason: string) {
-    const listing = await this.prisma.marketplaceListing.findUnique({ where: { id: listingId } });
+    const listing = await this.prisma.marketplaceListing.findUnique({
+      where: { id: listingId },
+      include: { device: { select: { imeiHash: true } } },
+    });
     if (!listing || !["PUBLISHED", "RESERVED", "PENDING_REVIEW"].includes(listing.status)) return;
-    await this.prisma.$transaction([
-      this.prisma.marketplaceListing.update({ where: { id: listingId }, data: { status: "SUSPENDED", suspendedReason: reason } }),
-      this.prisma.device.update({ where: { id: listing.deviceId }, data: { activeListingHash: null } }),
-    ]);
+    await this.prisma.$transaction(async (transaction) => {
+      await transaction.marketplaceListing.update({ where: { id: listingId }, data: { status: "SUSPENDED", suspendedReason: reason } });
+      if (shouldReleaseListingImei(listing.status)) {
+        await transaction.device.updateMany({
+          where: { id: listing.deviceId, activeListingHash: listing.device.imeiHash },
+          data: { activeListingHash: null },
+        });
+      }
+    });
     await this.prisma.shopNotification.create({
       data: { shopId: listing.shopId, type: "LISTING_SUSPENDED", title: "Annonce suspendue", message: reason },
     });
@@ -446,6 +563,7 @@ export class MarketplaceService {
   }
 
   private validateListingInput(input: CreateListingInput) {
+    if (!isValidImei(input.imei)) throw new BadRequestException("L’IMEI doit contenir 15 chiffres et avoir une clé de contrôle valide.");
     if (!input.serialNumber.trim() || !input.model.trim() || !input.capacity.trim() || !input.color.trim()) throw new BadRequestException("IMEI, numéro de série, modèle, capacité et couleur sont obligatoires.");
     if (!Number.isInteger(input.batteryPercent) || input.batteryPercent < 0 || input.batteryPercent > 100) throw new BadRequestException("La batterie doit être entre 0 et 100 %.");
     if (!Number.isSafeInteger(input.priceCashXof) || input.priceCashXof <= 0) throw new BadRequestException("Le prix comptant doit être un entier XOF positif.");

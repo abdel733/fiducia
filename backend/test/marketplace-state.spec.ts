@@ -1,5 +1,5 @@
 import { MarketplaceListingStatus } from "@prisma/client";
-import { canTransitionListing } from "../src/marketplace/marketplace.service";
+import { canTransitionListing, getTrustedReportSeverity, shouldReleaseListingImei } from "../src/marketplace/marketplace.service";
 
 describe("Marketplace listing state machine", () => {
   it.each([
@@ -15,5 +15,30 @@ describe("Marketplace listing state machine", () => {
     ["EXPIRED", "RESERVED", false],
   ])("allows %s → %s: %s", (from, to, expected) => {
     expect(canTransitionListing(from as MarketplaceListingStatus, to as MarketplaceListingStatus)).toBe(expected);
+  });
+});
+
+describe("Marketplace listing IMEI lock", () => {
+  it.each([
+    ["PUBLISHED", true],
+    ["RESERVED", true],
+    ["PENDING_REVIEW", false],
+    ["DRAFT", false],
+    ["SUSPENDED", false],
+    ["SOLD", false],
+    ["WITHDRAWN", false],
+    ["EXPIRED", false],
+  ])("releases the IMEI lock for %s: %s", (status, expected) => {
+    expect(shouldReleaseListingImei(status as MarketplaceListingStatus)).toBe(expected);
+  });
+});
+
+describe("Marketplace report severity", () => {
+  it("does not trust severity supplied by a public reporter", () => {
+    expect(getTrustedReportSeverity("CRITICAL", ["BUYER"])).toBe("MEDIUM");
+  });
+
+  it("allows trusted agents to classify urgent reports", () => {
+    expect(getTrustedReportSeverity("CRITICAL", ["AGENT"])).toBe("CRITICAL");
   });
 });

@@ -11,6 +11,7 @@ export interface InspectionChecklistInput {
   speakers: boolean;
   ports: boolean;
   repairTraces: boolean;
+  notes?: string;
   photos: string[];
   sellerName?: string;
   checkedBy?: "SELLER" | "AGENT";

@@ -20,7 +20,9 @@ describe("CryptoService", () => {
   it("rejects tampered ciphertext and unavailable key versions", () => {
     const crypto = new CryptoService(validateEnvironment({ DATA_ENCRYPTION_KEYS: JSON.stringify({ v1: firstKey }), DATA_ENCRYPTION_ACTIVE_KEY_VERSION: "v1" }));
     const encrypted = crypto.encrypt("sensitive");
-    expect(() => crypto.decrypt(`${encrypted.slice(0, -1)}x`)).toThrow();
+    const [version, iv, tag, ciphertext] = encrypted.split(".");
+    const tampered = [version, iv, `${tag![0] === "A" ? "B" : "A"}${tag!.slice(1)}`, ciphertext].join(".");
+    expect(() => crypto.decrypt(tampered)).toThrow();
     expect(() => crypto.decrypt("v9.a.b.c")).toThrow(/unavailable/);
   });
 });
